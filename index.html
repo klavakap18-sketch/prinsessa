@@ -1,551 +1,876 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { Input } from "@/components/ui/input";
-import { CheckCircle2, Heart, Castle, TimerReset, RotateCcw, Swords } from "lucide-react";
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Построй мост и спаси принцессу</title>
+  <style>
+    :root {
+      --bg1: #dbeafe;
+      --bg2: #f0fdf4;
+      --panel: rgba(255,255,255,0.92);
+      --text: #1f2937;
+      --muted: #64748b;
+      --accent: #ec4899;
+      --accent-hover: #db2777;
+      --good-bg: #ecfdf5;
+      --good-text: #047857;
+      --bad-bg: #fff1f2;
+      --bad-text: #be123c;
+      --bridge-active: #92400e;
+      --bridge-inactive: #cbd5e1;
+      --water: #93c5fd;
+      --border: #e2e8f0;
+      --shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
+      --radius: 24px;
+    }
 
-// Рабочая версия игры с параметрами, которые потом можно будет менять из редактора.
-// Под Genially удобно использовать как основу для встраивания через iframe/web embed.
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      color: var(--text);
+      background: linear-gradient(180deg, var(--bg1), var(--bg2));
+      min-height: 100vh;
+    }
 
-// =========================
-// Типы
-// =========================
-type Difficulty = "easy" | "medium" | "hard";
-type QuestionMode = "multiple" | "input";
-type TaskType = "math" | "question";
-type Screen = "start" | "game" | "success" | "fail";
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 20px;
+    }
 
-type Task = {
-  id: string;
-  type: TaskType;
-  prompt: string;
-  correctAnswer: string;
-  options?: string[];
-  mode: QuestionMode;
-  explanation?: string;
-};
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
 
-type ThemeConfig = {
-  skyClass: string;
-  panelClass: string;
-  accentClass: string;
-  bridgeColorClass: string;
-  heroName: string;
-  princessName: string;
-  title: string;
-};
+    .title h1 {
+      margin: 0;
+      font-size: clamp(28px, 5vw, 42px);
+      line-height: 1.05;
+    }
 
-type GameConfig = {
-  difficulty: Difficulty;
-  allowedTaskTypes: TaskType[];
-  totalBridgeParts: number;
-  attemptsPerTask: number;
-  timeLimitSec: number | null;
-  allowSound: boolean;
-  showBridgePreviewAfterCorrect: boolean;
-  dragonBossEnabled: boolean;
-  randomizeTasks: boolean;
-  theme: ThemeConfig;
-  customTasks?: Task[];
-};
+    .title p {
+      margin: 8px 0 0;
+      color: var(--muted);
+    }
 
-// =========================
-// Конфиг — будущая база для редактора
-// =========================
-const DEFAULT_CONFIG: GameConfig = {
-  difficulty: "easy",
-  allowedTaskTypes: ["math", "question"],
-  totalBridgeParts: 6,
-  attemptsPerTask: 2,
-  timeLimitSec: 20,
-  allowSound: false,
-  showBridgePreviewAfterCorrect: true,
-  dragonBossEnabled: false,
-  randomizeTasks: false,
-  theme: {
-    skyClass: "bg-gradient-to-b from-sky-200 via-cyan-100 to-emerald-100",
-    panelClass: "bg-white/85 backdrop-blur",
-    accentClass: "bg-pink-500 hover:bg-pink-600",
-    bridgeColorClass: "bg-amber-700",
-    heroName: "Рыцарь",
-    princessName: "Принцесса",
-    title: "Построй мост и спаси принцессу",
-  },
-};
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
 
-const TASK_BANK: Record<Difficulty, Task[]> = {
-  easy: [
-    { id: "e1", type: "math", prompt: "2 + 3 = ?", correctAnswer: "5", options: ["4", "5", "6"], mode: "multiple" },
-    { id: "e2", type: "math", prompt: "7 - 4 = ?", correctAnswer: "3", options: ["2", "3", "5"], mode: "multiple" },
-    { id: "e3", type: "math", prompt: "5 + 4 = ?", correctAnswer: "9", mode: "input" },
-    { id: "e4", type: "question", prompt: "Сколько дней в неделе?", correctAnswer: "7", options: ["6", "7", "8"], mode: "multiple" },
-    { id: "e5", type: "question", prompt: "Как называется фигура с тремя сторонами?", correctAnswer: "треугольник", options: ["квадрат", "треугольник", "круг"], mode: "multiple" },
-    { id: "e6", type: "math", prompt: "10 - 1 = ?", correctAnswer: "9", mode: "input" },
-    { id: "e7", type: "question", prompt: "Какое время года идёт после весны?", correctAnswer: "лето", options: ["осень", "лето", "зима"], mode: "multiple" },
-    { id: "e8", type: "math", prompt: "3 + 6 = ?", correctAnswer: "9", options: ["8", "9", "10"], mode: "multiple" },
-  ],
-  medium: [
-    { id: "m1", type: "math", prompt: "12 + 8 = ?", correctAnswer: "20", options: ["18", "20", "22"], mode: "multiple" },
-    { id: "m2", type: "math", prompt: "15 - 7 = ?", correctAnswer: "8", mode: "input" },
-    { id: "m3", type: "math", prompt: "6 × 4 = ?", correctAnswer: "24", options: ["22", "24", "26"], mode: "multiple" },
-    { id: "m4", type: "question", prompt: "Сколько сантиметров в 1 метре?", correctAnswer: "100", options: ["10", "100", "1000"], mode: "multiple" },
-    { id: "m5", type: "question", prompt: "Столица Франции?", correctAnswer: "париж", options: ["мадрид", "париж", "рим"], mode: "multiple" },
-    { id: "m6", type: "math", prompt: "36 ÷ 6 = ?", correctAnswer: "6", mode: "input" },
-    { id: "m7", type: "math", prompt: "9 + 14 = ?", correctAnswer: "23", options: ["21", "23", "24"], mode: "multiple" },
-    { id: "m8", type: "question", prompt: "Сколько часов в сутках?", correctAnswer: "24", mode: "input" },
-  ],
-  hard: [
-    { id: "h1", type: "math", prompt: "48 ÷ 6 = ?", correctAnswer: "8", options: ["6", "8", "9"], mode: "multiple" },
-    { id: "h2", type: "math", prompt: "17 × 3 = ?", correctAnswer: "51", mode: "input" },
-    { id: "h3", type: "math", prompt: "64 - 27 = ?", correctAnswer: "37", mode: "input" },
-    { id: "h4", type: "question", prompt: "Сколько градусов в прямом угле?", correctAnswer: "90", options: ["45", "90", "180"], mode: "multiple" },
-    { id: "h5", type: "question", prompt: "Наименьшее простое число?", correctAnswer: "2", options: ["1", "2", "3"], mode: "multiple" },
-    { id: "h6", type: "math", prompt: "(9 × 5) - 8 = ?", correctAnswer: "37", options: ["35", "36", "37"], mode: "multiple" },
-    { id: "h7", type: "question", prompt: "Сколько минут в 2 часах?", correctAnswer: "120", mode: "input" },
-    { id: "h8", type: "math", prompt: "81 ÷ 9 + 14 = ?", correctAnswer: "23", mode: "input" },
-  ],
-};
+    .badge {
+      background: rgba(255,255,255,0.75);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 14px;
+    }
 
-// =========================
-// Вспомогательные функции
-// =========================
-function normalizeAnswer(value: string) {
-  return value.trim().toLowerCase().replace(/ё/g, "е");
-}
+    .panel {
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
 
-function shuffle<T>(items: T[]) {
-  const cloned = [...items];
-  for (let i = cloned.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [cloned[i], cloned[j]] = [cloned[j], cloned[i]];
-  }
-  return cloned;
-}
+    .btn {
+      border: none;
+      border-radius: 18px;
+      padding: 12px 18px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
 
-function getTasks(config: GameConfig) {
-  const base = config.customTasks?.length ? config.customTasks : TASK_BANK[config.difficulty];
-  const filtered = base.filter((task) => config.allowedTaskTypes.includes(task.type));
-  const prepared = config.randomizeTasks ? shuffle(filtered) : filtered;
-  return prepared.slice(0, Math.max(config.totalBridgeParts, config.dragonBossEnabled ? config.totalBridgeParts + 1 : config.totalBridgeParts));
-}
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
 
-function useBeep(enabled: boolean) {
-  return (kind: "ok" | "bad" | "win") => {
-    if (!enabled || typeof window === "undefined") return;
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    .btn-primary:hover { background: var(--accent-hover); }
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+    .btn-secondary {
+      background: white;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
 
-    const settings = {
-      ok: { freq: 660, duration: 0.12 },
-      bad: { freq: 220, duration: 0.18 },
-      win: { freq: 880, duration: 0.28 },
-    }[kind];
+    .hidden { display: none !important; }
 
-    osc.frequency.value = settings.freq;
-    osc.type = kind === "bad" ? "square" : "sine";
-    gain.gain.value = 0.05;
-    osc.start();
-    osc.stop(ctx.currentTime + settings.duration);
-  };
-}
+    .bridge-scene {
+      display: grid;
+      grid-template-columns: 100px 1fr 100px;
+      align-items: end;
+      gap: 14px;
+      min-height: 220px;
+    }
 
-function Bridge({ built, total, colorClass }: { built: number; total: number; colorClass: string }) {
-  return (
-    <div className="w-full max-w-3xl mx-auto">
-      <div className="flex items-end justify-between gap-3 min-h-40">
-        <div className="w-24 h-32 rounded-t-3xl bg-stone-500/90 border-4 border-stone-700 relative">
-          <div className="absolute inset-x-4 top-5 h-4 rounded bg-black/20" />
-          <div className="absolute inset-x-8 top-14 h-14 rounded-t-full bg-pink-200 border-2 border-pink-400 flex items-end justify-center text-3xl">
-            👸
-          </div>
-        </div>
+    .tower {
+      height: 160px;
+      border-radius: 28px 28px 0 0;
+      background: #78716c;
+      border: 4px solid #44403c;
+      position: relative;
+      display: flex;
+      align-items: end;
+      justify-content: center;
+      padding-bottom: 12px;
+      font-size: 50px;
+    }
 
-        <div className="flex-1 px-2">
-          <div className="flex items-end gap-1 h-28">
-            {Array.from({ length: total }).map((_, i) => {
-              const active = i < built;
-              return (
-                <motion.div
-                  key={i}
-                  initial={{ scaleY: 0.2, opacity: 0.4 }}
-                  animate={{ scaleY: active ? 1 : 0.2, opacity: active ? 1 : 0.3 }}
-                  transition={{ duration: 0.35 }}
-                  className={`flex-1 rounded-t-xl border-2 border-amber-900 ${active ? colorClass : "bg-stone-300"}`}
-                  style={{ height: `${50 + ((i % 2) * 18)}px` }}
-                />
-              );
-            })}
-          </div>
-          <div className="h-5 bg-blue-300/70 rounded-full mt-3" />
-        </div>
+    .hero {
+      width: 88px;
+      height: 88px;
+      border-radius: 999px;
+      background: #334155;
+      border: 4px solid #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 42px;
+      margin-left: auto;
+    }
 
-        <div className="w-20 h-20 rounded-full bg-slate-700 border-4 border-slate-900 flex items-center justify-center text-3xl">
-          🧙
-        </div>
+    .bridge-zone {
+      align-self: end;
+    }
+
+    .bridge-parts {
+      display: grid;
+      grid-template-columns: repeat(var(--parts-count), 1fr);
+      gap: 6px;
+      align-items: end;
+      height: 110px;
+    }
+
+    .bridge-part {
+      border-radius: 16px 16px 0 0;
+      border: 2px solid #78350f;
+      background: var(--bridge-inactive);
+      opacity: 0.45;
+      transform-origin: bottom center;
+      transition: 0.35s ease;
+    }
+
+    .bridge-part.active {
+      background: var(--bridge-active);
+      opacity: 1;
+      transform: scaleY(1.02);
+    }
+
+    .water {
+      height: 18px;
+      border-radius: 999px;
+      background: var(--water);
+      margin-top: 10px;
+    }
+
+    .progress-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .progress {
+      height: 14px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #f472b6, #fb7185);
+      transition: width 0.35s ease;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .story-visual {
+      min-height: 300px;
+      border-radius: 28px;
+      background: linear-gradient(135deg, #ede9fe, #fef3c7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 120px;
+    }
+
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .pill {
+      background: white;
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      border-radius: 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .task-type {
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-align: center;
+    }
+
+    .task-card {
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 28px;
+      background: linear-gradient(90deg, #fff, #f8fafc);
+      text-align: center;
+    }
+
+    .task-prompt {
+      font-size: clamp(28px, 4vw, 48px);
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .status-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .status-items {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .option-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .option-btn {
+      border: 2px solid var(--border);
+      background: white;
+      border-radius: 18px;
+      padding: 16px;
+      font-size: 20px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: .2s ease;
+    }
+
+    .option-btn.active {
+      border-color: var(--accent);
+      background: #fdf2f8;
+    }
+
+    .answer-input {
+      width: min(420px, 100%);
+      display: block;
+      margin: 20px auto 0;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      font-size: 22px;
+      padding: 16px 18px;
+    }
+
+    .center { text-align: center; }
+
+    .feedback {
+      margin-top: 18px;
+      border-radius: 18px;
+      padding: 16px;
+      text-align: center;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+
+    .feedback.good {
+      background: var(--good-bg);
+      color: var(--good-text);
+      border-color: #a7f3d0;
+    }
+
+    .feedback.bad {
+      background: var(--bad-bg);
+      color: var(--bad-text);
+      border-color: #fecdd3;
+    }
+
+    .result {
+      text-align: center;
+      padding: 16px 6px;
+    }
+
+    .result .emoji {
+      font-size: 110px;
+      margin-bottom: 12px;
+    }
+
+    .result h2 {
+      font-size: clamp(28px, 4vw, 42px);
+      margin: 0 0 12px;
+    }
+
+    .teacher-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 300px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      padding: 16px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      background: #f8fafc;
+      resize: vertical;
+    }
+
+    .teacher-msg {
+      margin-top: 12px;
+      background: #f1f5f9;
+      border-radius: 14px;
+      padding: 12px 14px;
+      color: #334155;
+      font-size: 14px;
+    }
+
+    .small-note {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 12px;
+    }
+
+    @media (max-width: 900px) {
+      .grid-2, .bridge-scene { grid-template-columns: 1fr; }
+      .hero { margin: 0 auto; }
+      .tower { margin: 0 auto; width: 120px; }
+      .option-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="title">
+        <h1 id="gameTitle">Построй мост и спаси принцессу</h1>
+        <p>Готовая HTML-версия для GitHub Pages и встраивания в Genially.</p>
+      </div>
+      <div class="controls">
+        <div class="badge">Сложность: <b id="difficultyBadge">easy</b></div>
+        <div class="badge">Детали моста: <b id="partsBadge">0/6</b></div>
+        <button class="btn btn-secondary" id="teacherToggleBtn">Панель учителя</button>
+        <button class="btn btn-secondary" id="restartBtn">Начать заново</button>
       </div>
     </div>
-  );
-}
 
-function DragonBoss({ onWin }: { onWin: () => void }) {
-  const [hits, setHits] = useState(0);
-  const goal = 3;
-  return (
-    <Card className="border-2 border-orange-300 shadow-xl">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-xl">
-          <Swords className="w-5 h-5" /> Битва с драконом
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="text-7xl text-center">🐉</div>
-        <p className="text-center text-sm text-slate-600">
-          Финальный этап: нажми на дракона {goal} раза, чтобы прогнать его и спасти принцессу.
-        </p>
-        <Progress value={(hits / goal) * 100} />
-        <div className="flex justify-center">
-          <Button
-            className="rounded-2xl px-8"
-            onClick={() => {
-              const next = hits + 1;
-              setHits(next);
-              if (next >= goal) onWin();
-            }}
-          >
-            Атаковать дракона
-          </Button>
+    <section class="panel hidden" id="teacherPanel">
+      <h2 style="margin-top:0">Панель учителя / будущий редактор</h2>
+      <div class="teacher-row">
+        <button class="btn btn-secondary" data-preset="easy">Пресет easy</button>
+        <button class="btn btn-secondary" data-preset="medium">Пресет medium</button>
+        <button class="btn btn-secondary" data-preset="hard">Пресет hard</button>
+        <button class="btn btn-primary" id="applyConfigBtn">Применить JSON</button>
+        <button class="btn btn-secondary" id="copyConfigBtn">Скопировать JSON</button>
+      </div>
+      <p class="small-note">
+        Здесь можно менять конфигурацию игры. Это уже заготовка для будущего визуального редактора.
+      </p>
+      <textarea id="configInput"></textarea>
+      <div id="teacherMessage" class="teacher-msg hidden"></div>
+    </section>
+
+    <section class="panel" id="bridgePanel">
+      <div class="bridge-scene">
+        <div class="tower">👸</div>
+        <div class="bridge-zone">
+          <div class="bridge-parts" id="bridgeParts"></div>
+          <div class="water"></div>
         </div>
-      </CardContent>
-    </Card>
-  );
-}
+        <div class="hero">🧙</div>
+      </div>
+      <div class="progress-row">
+        <span>Прогресс строительства</span>
+        <span id="progressLabel">0%</span>
+      </div>
+      <div class="progress"><span id="progressBar"></span></div>
+    </section>
 
-export default function BridgePrincessGame() {
-  const [config] = useState<GameConfig>(DEFAULT_CONFIG);
-  const playBeep = useBeep(config.allowSound);
+    <section class="panel" id="startScreen">
+      <div class="grid-2">
+        <div>
+          <div class="badge" style="display:inline-block;margin-bottom:10px">Сюжетный экран</div>
+          <h2 style="font-size:36px; margin:0 0 12px;">Принцесса ждёт спасения, а мост разрушен.</h2>
+          <p style="color:var(--muted);line-height:1.6">
+            Решай задания, получай детали и достраивай мост. Когда мост будет готов,
+            <span id="dragonHint">ты спасёшь принцессу.</span>
+          </p>
+          <div class="pills">
+            <div class="pill">Попыток на задание: <b id="attemptsPill">2</b></div>
+            <div class="pill">Лимит времени: <b id="timePill">20 сек.</b></div>
+            <div class="pill">Типы: <b id="typesPill">math, question</b></div>
+          </div>
+          <div style="margin-top:18px">
+            <button class="btn btn-primary" id="startBtn">Начать игру</button>
+          </div>
+        </div>
+        <div class="story-visual">🏰</div>
+      </div>
+    </section>
 
-  const tasks = useMemo(() => getTasks(config), [config]);
-  const [screen, setScreen] = useState<Screen>("start");
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [builtParts, setBuiltParts] = useState(0);
-  const [attemptsLeft, setAttemptsLeft] = useState(config.attemptsPerTask);
-  const [selectedOption, setSelectedOption] = useState<string>("");
-  const [inputAnswer, setInputAnswer] = useState("");
-  const [feedback, setFeedback] = useState("");
-  const [timeLeft, setTimeLeft] = useState<number | null>(config.timeLimitSec);
-  const [showBridgePulse, setShowBridgePulse] = useState(false);
-  const [bossUnlocked, setBossUnlocked] = useState(false);
+    <section class="panel hidden" id="gameScreen">
+      <div class="status-row">
+        <h2 style="margin:0; font-size:32px;">Задание <span id="taskNumber">1</span> из <span id="taskTotal">6</span></h2>
+        <div class="status-items">
+          <div class="badge">Попытки: <b id="attemptsLeft">2</b></div>
+          <div class="badge" id="timerBadge">Время: <b id="timeLeft">20</b> сек.</div>
+        </div>
+      </div>
+      <div class="task-card">
+        <div class="task-type" id="taskTypeLabel">Математическое задание</div>
+        <div class="task-prompt" id="taskPrompt">2 + 3 = ?</div>
+      </div>
+      <div id="multipleChoiceWrap" class="option-grid"></div>
+      <input id="textAnswerInput" class="answer-input hidden" placeholder="Введи ответ" />
+      <div class="center" style="margin-top:20px">
+        <button class="btn btn-primary" id="checkBtn">Проверить</button>
+      </div>
+      <div id="feedback" class="feedback hidden"></div>
+    </section>
 
-  const currentTask = tasks[currentIndex];
-  const progress = Math.min(100, (builtParts / config.totalBridgeParts) * 100);
+    <section class="panel hidden" id="bossScreen">
+      <div class="result">
+        <div class="emoji">🐉</div>
+        <h2>Битва с драконом</h2>
+        <p style="color:var(--muted)">Нажми на кнопку 3 раза, чтобы прогнать дракона и спасти принцессу.</p>
+        <div class="progress" style="max-width:420px;margin:18px auto"><span id="bossBar"></span></div>
+        <div style="margin-top:18px">
+          <button class="btn btn-primary" id="attackDragonBtn">Атаковать дракона</button>
+        </div>
+      </div>
+    </section>
 
-  const resetRoundState = () => {
-    setSelectedOption("");
-    setInputAnswer("");
-    setAttemptsLeft(config.attemptsPerTask);
-    setFeedback("");
-    setTimeLeft(config.timeLimitSec);
-  };
+    <section class="panel hidden" id="successScreen">
+      <div class="result">
+        <div class="emoji">🦸‍♂️👸</div>
+        <h2>Поздравляем! Ты спас принцессу!</h2>
+        <p style="color:var(--muted)">Мост построен, путь открыт, и герой добрался до башни.</p>
+        <button class="btn btn-primary" id="successRestartBtn">Играть снова</button>
+      </div>
+    </section>
 
-  const restartGame = () => {
-    setScreen("start");
-    setCurrentIndex(0);
-    setBuiltParts(0);
-    setBossUnlocked(false);
-    setShowBridgePulse(false);
-    resetRoundState();
-  };
+    <section class="panel hidden" id="failScreen">
+      <div class="result">
+        <div class="emoji">💔👸</div>
+        <h2>К сожалению, ты не смог построить мост и спасти принцессу.</h2>
+        <p style="color:var(--muted)">Попробуй ещё раз или измени параметры в панели учителя.</p>
+        <button class="btn btn-primary" id="failRestartBtn">Начать заново</button>
+      </div>
+    </section>
+  </div>
 
-  useEffect(() => {
-    if (screen !== "game") return;
-    if (config.timeLimitSec == null) return;
-    if (bossUnlocked) return;
-    if (timeLeft == null) return;
-    if (timeLeft <= 0) {
-      setFeedback("Время вышло! Попробуй ещё раз в следующей игре.");
-      setScreen("fail");
-      playBeep("bad");
-      return;
+  <script>
+    const DEFAULT_CONFIG = {
+      difficulty: "easy",
+      allowedTaskTypes: ["math", "question"],
+      totalBridgeParts: 6,
+      attemptsPerTask: 2,
+      timeLimitSec: 20,
+      allowSound: false,
+      showBridgePreviewAfterCorrect: true,
+      dragonBossEnabled: false,
+      randomizeTasks: false,
+      theme: {
+        title: "Построй мост и спаси принцессу"
+      },
+      customTasks: []
+    };
+
+    const TASK_BANK = {
+      easy: [
+        { id: "e1", type: "math", prompt: "2 + 3 = ?", correctAnswer: "5", options: ["4", "5", "6"], mode: "multiple" },
+        { id: "e2", type: "math", prompt: "7 - 4 = ?", correctAnswer: "3", options: ["2", "3", "5"], mode: "multiple" },
+        { id: "e3", type: "math", prompt: "5 + 4 = ?", correctAnswer: "9", mode: "input" },
+        { id: "e4", type: "question", prompt: "Сколько дней в неделе?", correctAnswer: "7", options: ["6", "7", "8"], mode: "multiple" },
+        { id: "e5", type: "question", prompt: "Как называется фигура с тремя сторонами?", correctAnswer: "треугольник", options: ["квадрат", "треугольник", "круг"], mode: "multiple" },
+        { id: "e6", type: "math", prompt: "10 - 1 = ?", correctAnswer: "9", mode: "input" },
+        { id: "e7", type: "question", prompt: "Какое время года идёт после весны?", correctAnswer: "лето", options: ["осень", "лето", "зима"], mode: "multiple" },
+        { id: "e8", type: "math", prompt: "3 + 6 = ?", correctAnswer: "9", options: ["8", "9", "10"], mode: "multiple" }
+      ],
+      medium: [
+        { id: "m1", type: "math", prompt: "12 + 8 = ?", correctAnswer: "20", options: ["18", "20", "22"], mode: "multiple" },
+        { id: "m2", type: "math", prompt: "15 - 7 = ?", correctAnswer: "8", mode: "input" },
+        { id: "m3", type: "math", prompt: "6 × 4 = ?", correctAnswer: "24", options: ["22", "24", "26"], mode: "multiple" },
+        { id: "m4", type: "question", prompt: "Сколько сантиметров в 1 метре?", correctAnswer: "100", options: ["10", "100", "1000"], mode: "multiple" },
+        { id: "m5", type: "question", prompt: "Столица Франции?", correctAnswer: "париж", options: ["мадрид", "париж", "рим"], mode: "multiple" },
+        { id: "m6", type: "math", prompt: "36 ÷ 6 = ?", correctAnswer: "6", mode: "input" },
+        { id: "m7", type: "math", prompt: "9 + 14 = ?", correctAnswer: "23", options: ["21", "23", "24"], mode: "multiple" },
+        { id: "m8", type: "question", prompt: "Сколько часов в сутках?", correctAnswer: "24", mode: "input" }
+      ],
+      hard: [
+        { id: "h1", type: "math", prompt: "48 ÷ 6 = ?", correctAnswer: "8", options: ["6", "8", "9"], mode: "multiple" },
+        { id: "h2", type: "math", prompt: "17 × 3 = ?", correctAnswer: "51", mode: "input" },
+        { id: "h3", type: "math", prompt: "64 - 27 = ?", correctAnswer: "37", mode: "input" },
+        { id: "h4", type: "question", prompt: "Сколько градусов в прямом угле?", correctAnswer: "90", options: ["45", "90", "180"], mode: "multiple" },
+        { id: "h5", type: "question", prompt: "Наименьшее простое число?", correctAnswer: "2", options: ["1", "2", "3"], mode: "multiple" },
+        { id: "h6", type: "math", prompt: "(9 × 5) - 8 = ?", correctAnswer: "37", options: ["35", "36", "37"], mode: "multiple" },
+        { id: "h7", type: "question", prompt: "Сколько минут в 2 часах?", correctAnswer: "120", mode: "input" },
+        { id: "h8", type: "math", prompt: "81 ÷ 9 + 14 = ?", correctAnswer: "23", mode: "input" }
+      ]
+    };
+
+    let state = {
+      config: structuredClone(DEFAULT_CONFIG),
+      tasks: [],
+      screen: "start",
+      currentIndex: 0,
+      builtParts: 0,
+      attemptsLeft: DEFAULT_CONFIG.attemptsPerTask,
+      timeLeft: DEFAULT_CONFIG.timeLimitSec,
+      selectedOption: "",
+      feedback: "",
+      bossHits: 0,
+      timerId: null
+    };
+
+    const el = {
+      gameTitle: document.getElementById("gameTitle"),
+      difficultyBadge: document.getElementById("difficultyBadge"),
+      partsBadge: document.getElementById("partsBadge"),
+      teacherPanel: document.getElementById("teacherPanel"),
+      bridgeParts: document.getElementById("bridgeParts"),
+      progressBar: document.getElementById("progressBar"),
+      progressLabel: document.getElementById("progressLabel"),
+      startScreen: document.getElementById("startScreen"),
+      gameScreen: document.getElementById("gameScreen"),
+      bossScreen: document.getElementById("bossScreen"),
+      successScreen: document.getElementById("successScreen"),
+      failScreen: document.getElementById("failScreen"),
+      dragonHint: document.getElementById("dragonHint"),
+      attemptsPill: document.getElementById("attemptsPill"),
+      timePill: document.getElementById("timePill"),
+      typesPill: document.getElementById("typesPill"),
+      taskNumber: document.getElementById("taskNumber"),
+      taskTotal: document.getElementById("taskTotal"),
+      attemptsLeft: document.getElementById("attemptsLeft"),
+      timerBadge: document.getElementById("timerBadge"),
+      timeLeft: document.getElementById("timeLeft"),
+      taskTypeLabel: document.getElementById("taskTypeLabel"),
+      taskPrompt: document.getElementById("taskPrompt"),
+      multipleChoiceWrap: document.getElementById("multipleChoiceWrap"),
+      textAnswerInput: document.getElementById("textAnswerInput"),
+      feedback: document.getElementById("feedback"),
+      configInput: document.getElementById("configInput"),
+      teacherMessage: document.getElementById("teacherMessage"),
+      bossBar: document.getElementById("bossBar")
+    };
+
+    function normalizeAnswer(value) {
+      return String(value).trim().toLowerCase().replaceAll("ё", "е");
     }
-    const timer = window.setTimeout(() => setTimeLeft((v) => (v == null ? v : v - 1)), 1000);
-    return () => window.clearTimeout(timer);
-  }, [timeLeft, screen, config.timeLimitSec, bossUnlocked]);
 
-  useEffect(() => {
-    setAttemptsLeft(config.attemptsPerTask);
-    setTimeLeft(config.timeLimitSec);
-  }, [currentIndex, config.attemptsPerTask, config.timeLimitSec]);
-
-  const submitAnswer = () => {
-    if (!currentTask) return;
-
-    const rawAnswer = currentTask.mode === "multiple" ? selectedOption : inputAnswer;
-    if (!rawAnswer.trim()) {
-      setFeedback("Сначала выбери или введи ответ.");
-      return;
+    function shuffle(arr) {
+      const clone = [...arr];
+      for (let i = clone.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [clone[i], clone[j]] = [clone[j], clone[i]];
+      }
+      return clone;
     }
 
-    const isCorrect = normalizeAnswer(rawAnswer) === normalizeAnswer(currentTask.correctAnswer);
+    function getTasks(config) {
+      const base = Array.isArray(config.customTasks) && config.customTasks.length
+        ? config.customTasks
+        : TASK_BANK[config.difficulty] || TASK_BANK.easy;
+      const filtered = base.filter(task => config.allowedTaskTypes.includes(task.type));
+      const prepared = config.randomizeTasks ? shuffle(filtered) : filtered;
+      return prepared.slice(0, Math.max(config.totalBridgeParts, config.dragonBossEnabled ? config.totalBridgeParts + 1 : config.totalBridgeParts));
+    }
 
-    if (isCorrect) {
-      playBeep("ok");
-      setBuiltParts((prev) => Math.min(config.totalBridgeParts, prev + 1));
-      setFeedback("Верно! Ты получил деталь моста!");
-      setShowBridgePulse(true);
-      window.setTimeout(() => setShowBridgePulse(false), 900);
+    function setTeacherMessage(text) {
+      el.teacherMessage.textContent = text;
+      el.teacherMessage.classList.remove("hidden");
+    }
 
-      const newBuilt = builtParts + 1;
-      const bridgeCompleted = newBuilt >= config.totalBridgeParts;
+    function hideAllScreens() {
+      [el.startScreen, el.gameScreen, el.bossScreen, el.successScreen, el.failScreen].forEach(s => s.classList.add("hidden"));
+    }
 
-      window.setTimeout(() => {
-        if (bridgeCompleted) {
-          if (config.dragonBossEnabled) {
-            setBossUnlocked(true);
-            setFeedback("Мост готов! Осталось победить дракона.");
-          } else {
-            playBeep("win");
-            setScreen("success");
-          }
-        } else {
-          setCurrentIndex((prev) => prev + 1);
-          resetRoundState();
+    function renderBridge() {
+      const total = state.config.totalBridgeParts;
+      el.bridgeParts.style.setProperty("--parts-count", total);
+      el.bridgeParts.innerHTML = "";
+      for (let i = 0; i < total; i++) {
+        const div = document.createElement("div");
+        div.className = "bridge-part" + (i < state.builtParts ? " active" : "");
+        div.style.height = (58 + (i % 2) * 18) + "px";
+        el.bridgeParts.appendChild(div);
+      }
+      const progress = Math.min(100, Math.round((state.builtParts / total) * 100));
+      el.progressBar.style.width = progress + "%";
+      el.progressLabel.textContent = progress + "%";
+      el.partsBadge.textContent = `${state.builtParts}/${total}`;
+    }
+
+    function updateStaticUI() {
+      el.gameTitle.textContent = state.config.theme?.title || DEFAULT_CONFIG.theme.title;
+      el.difficultyBadge.textContent = state.config.difficulty;
+      el.attemptsPill.textContent = state.config.attemptsPerTask;
+      el.timePill.textContent = state.config.timeLimitSec == null ? "без лимита" : `${state.config.timeLimitSec} сек.`;
+      el.typesPill.textContent = state.config.allowedTaskTypes.join(", ");
+      el.dragonHint.textContent = state.config.dragonBossEnabled ? "тебя ждёт ещё и дракон." : "ты спасёшь принцессу.";
+      el.configInput.value = JSON.stringify(state.config, null, 2);
+      renderBridge();
+    }
+
+    function renderTask() {
+      const task = state.tasks[state.currentIndex];
+      if (!task) return;
+      el.taskNumber.textContent = String(Math.min(state.currentIndex + 1, state.config.totalBridgeParts));
+      el.taskTotal.textContent = String(state.config.totalBridgeParts);
+      el.attemptsLeft.textContent = String(state.attemptsLeft);
+      el.taskTypeLabel.textContent = task.type === "math" ? "Математическое задание" : "Вопрос";
+      el.taskPrompt.textContent = task.prompt;
+      el.timeLeft.textContent = String(state.timeLeft ?? "∞");
+      el.timerBadge.classList.toggle("hidden", state.config.timeLimitSec == null);
+      el.multipleChoiceWrap.innerHTML = "";
+      el.textAnswerInput.value = "";
+      state.selectedOption = "";
+      el.feedback.className = "feedback hidden";
+      el.feedback.textContent = "";
+
+      if (task.mode === "multiple") {
+        el.multipleChoiceWrap.classList.remove("hidden");
+        el.textAnswerInput.classList.add("hidden");
+        (task.options || []).forEach(option => {
+          const btn = document.createElement("button");
+          btn.className = "option-btn";
+          btn.textContent = option;
+          btn.addEventListener("click", () => {
+            state.selectedOption = option;
+            [...el.multipleChoiceWrap.querySelectorAll(".option-btn")].forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+          });
+          el.multipleChoiceWrap.appendChild(btn);
+        });
+      } else {
+        el.multipleChoiceWrap.classList.add("hidden");
+        el.textAnswerInput.classList.remove("hidden");
+      }
+    }
+
+    function showScreen(name) {
+      state.screen = name;
+      hideAllScreens();
+      if (name === "start") el.startScreen.classList.remove("hidden");
+      if (name === "game") el.gameScreen.classList.remove("hidden");
+      if (name === "boss") el.bossScreen.classList.remove("hidden");
+      if (name === "success") el.successScreen.classList.remove("hidden");
+      if (name === "fail") el.failScreen.classList.remove("hidden");
+      manageTimer();
+    }
+
+    function clearTimer() {
+      if (state.timerId) {
+        clearInterval(state.timerId);
+        state.timerId = null;
+      }
+    }
+
+    function manageTimer() {
+      clearTimer();
+      if (state.screen !== "game") return;
+      if (state.config.timeLimitSec == null) return;
+      state.timerId = setInterval(() => {
+        state.timeLeft -= 1;
+        el.timeLeft.textContent = String(state.timeLeft);
+        if (state.timeLeft <= 0) {
+          clearTimer();
+          failGame("Время вышло! Попробуй ещё раз в следующей игре.");
         }
-      }, config.showBridgePreviewAfterCorrect ? 1000 : 350);
-      return;
+      }, 1000);
     }
 
-    playBeep("bad");
-    const nextAttempts = attemptsLeft - 1;
-    if (nextAttempts <= 0) {
-      setFeedback("Попытки закончились.");
-      setScreen("fail");
-      return;
+    function resetRoundState() {
+      state.attemptsLeft = state.config.attemptsPerTask;
+      state.timeLeft = state.config.timeLimitSec;
+      state.selectedOption = "";
+      el.textAnswerInput.value = "";
     }
-    setAttemptsLeft(nextAttempts);
-    setFeedback(`Неверно! Попробуй еще раз. Осталось попыток: ${nextAttempts}.`);
-  };
 
-  return (
-    <div className={`min-h-screen w-full ${config.theme.skyClass} p-4 md:p-8`}>
-      <div className="max-w-6xl mx-auto space-y-6">
-        <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-black text-slate-800">{config.theme.title}</h1>
-            <p className="text-slate-600 mt-1">
-              Рабочая версия игры с параметрами для будущего редактора.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="px-4 py-2 rounded-2xl bg-white/70 border text-sm">
-              Сложность: <b>{config.difficulty}</b>
-            </div>
-            <div className="px-4 py-2 rounded-2xl bg-white/70 border text-sm">
-              Детали моста: <b>{builtParts}/{config.totalBridgeParts}</b>
-            </div>
-            <Button variant="outline" className="rounded-2xl" onClick={restartGame}>
-              <RotateCcw className="w-4 h-4 mr-2" /> Начать заново
-            </Button>
-          </div>
-        </header>
+    function restartGame() {
+      clearTimer();
+      state.tasks = getTasks(state.config);
+      state.currentIndex = 0;
+      state.builtParts = 0;
+      state.bossHits = 0;
+      resetRoundState();
+      renderBridge();
+      updateStaticUI();
+      showScreen("start");
+    }
 
-        <motion.div animate={showBridgePulse ? { scale: [1, 1.02, 1] } : { scale: 1 }}>
-          <Card className={`${config.theme.panelClass} border-0 shadow-xl rounded-3xl`}>
-            <CardContent className="p-6 space-y-4">
-              <Bridge built={builtParts} total={config.totalBridgeParts} colorClass={config.theme.bridgeColorClass} />
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm text-slate-600">
-                  <span>Прогресс строительства</span>
-                  <span>{Math.round(progress)}%</span>
-                </div>
-                <Progress value={progress} />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+    function nextStepAfterCorrect() {
+      const completed = state.builtParts >= state.config.totalBridgeParts;
+      if (completed) {
+        if (state.config.dragonBossEnabled) {
+          state.bossHits = 0;
+          el.bossBar.style.width = "0%";
+          showScreen("boss");
+        } else {
+          showScreen("success");
+        }
+        return;
+      }
+      state.currentIndex += 1;
+      resetRoundState();
+      renderTask();
+      manageTimer();
+    }
 
-        <AnimatePresence mode="wait">
-          {screen === "start" && (
-            <motion.div
-              key="start"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-            >
-              <Card className={`${config.theme.panelClass} rounded-3xl shadow-xl border-0`}>
-                <CardContent className="p-8 grid md:grid-cols-2 gap-6 items-center">
-                  <div className="space-y-4">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-pink-100 text-pink-700 text-sm font-medium">
-                      <Castle className="w-4 h-4" /> Сюжетный экран
-                    </div>
-                    <h2 className="text-2xl md:text-3xl font-bold text-slate-800">
-                      {config.theme.princessName} ждёт спасения, а мост разрушен.
-                    </h2>
-                    <p className="text-slate-600 leading-relaxed">
-                      Решай задания, получай детали и достраивай мост. Когда мост будет готов,
-                      {config.dragonBossEnabled ? " тебя ждёт ещё и дракон." : " ты спасёшь принцессу."}
-                    </p>
-                    <div className="flex flex-wrap gap-3 text-sm text-slate-600">
-                      <span className="px-3 py-2 rounded-xl bg-white border">Попыток на задание: {config.attemptsPerTask}</span>
-                      <span className="px-3 py-2 rounded-xl bg-white border">Лимит времени: {config.timeLimitSec ?? "без лимита"} сек.</span>
-                      <span className="px-3 py-2 rounded-xl bg-white border">Типы: {config.allowedTaskTypes.join(", ")}</span>
-                    </div>
-                    <Button className={`rounded-2xl px-6 ${config.theme.accentClass}`} onClick={() => setScreen("game")}>
-                      Начать игру
-                    </Button>
-                  </div>
-                  <div className="rounded-3xl bg-gradient-to-br from-violet-100 to-amber-50 p-6 min-h-80 flex items-center justify-center text-[120px]">
-                    🏰
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
+    function showFeedback(text, good) {
+      el.feedback.textContent = text;
+      el.feedback.className = `feedback ${good ? "good" : "bad"}`;
+    }
 
-          {screen === "game" && !bossUnlocked && currentTask && (
-            <motion.div
-              key={`game-${currentTask.id}`}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-            >
-              <Card className={`${config.theme.panelClass} rounded-3xl shadow-xl border-0`}>
-                <CardHeader>
-                  <CardTitle className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                    <span className="text-2xl">Задание {Math.min(currentIndex + 1, config.totalBridgeParts)} из {config.totalBridgeParts}</span>
-                    <div className="flex gap-2 flex-wrap text-sm">
-                      <span className="px-3 py-1 rounded-full bg-white border flex items-center gap-2">
-                        <Heart className="w-4 h-4 text-rose-500" /> Попытки: {attemptsLeft}
-                      </span>
-                      {config.timeLimitSec != null && (
-                        <span className="px-3 py-1 rounded-full bg-white border flex items-center gap-2">
-                          <TimerReset className="w-4 h-4 text-sky-500" /> Время: {timeLeft} сек.
-                        </span>
-                      )}
-                    </div>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="p-6 rounded-3xl bg-gradient-to-r from-white to-slate-50 border text-center">
-                    <div className="text-sm uppercase tracking-wide text-slate-500 mb-2">{currentTask.type === "math" ? "Математическое задание" : "Вопрос"}</div>
-                    <div className="text-3xl md:text-4xl font-black text-slate-800">{currentTask.prompt}</div>
-                  </div>
+    function failGame(message) {
+      showFeedback(message, false);
+      setTimeout(() => showScreen("fail"), 500);
+    }
 
-                  {currentTask.mode === "multiple" ? (
-                    <div className="grid sm:grid-cols-3 gap-3">
-                      {currentTask.options?.map((option) => {
-                        const active = selectedOption === option;
-                        return (
-                          <button
-                            key={option}
-                            onClick={() => setSelectedOption(option)}
-                            className={`rounded-2xl border-2 px-4 py-4 text-lg font-semibold transition ${
-                              active ? "border-pink-500 bg-pink-50" : "border-slate-200 bg-white hover:border-slate-300"
-                            }`}
-                          >
-                            {option}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="max-w-md mx-auto">
-                      <Input
-                        value={inputAnswer}
-                        onChange={(e) => setInputAnswer(e.target.value)}
-                        placeholder="Введи ответ"
-                        className="h-14 text-lg rounded-2xl bg-white"
-                      />
-                    </div>
-                  )}
+    function submitAnswer() {
+      const task = state.tasks[state.currentIndex];
+      if (!task) return;
+      const rawAnswer = task.mode === "multiple" ? state.selectedOption : el.textAnswerInput.value;
+      if (!String(rawAnswer).trim()) {
+        showFeedback("Сначала выбери или введи ответ.", false);
+        return;
+      }
+      const isCorrect = normalizeAnswer(rawAnswer) === normalizeAnswer(task.correctAnswer);
+      if (isCorrect) {
+        clearTimer();
+        state.builtParts = Math.min(state.config.totalBridgeParts, state.builtParts + 1);
+        renderBridge();
+        showFeedback("Верно! Ты получил деталь моста!", true);
+        setTimeout(nextStepAfterCorrect, state.config.showBridgePreviewAfterCorrect ? 900 : 250);
+        return;
+      }
+      state.attemptsLeft -= 1;
+      el.attemptsLeft.textContent = String(state.attemptsLeft);
+      if (state.attemptsLeft <= 0) {
+        failGame("Попытки закончились.");
+        return;
+      }
+      showFeedback(`Неверно! Попробуй еще раз. Осталось попыток: ${state.attemptsLeft}.`, false);
+    }
 
-                  <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-center">
-                    <Button className={`rounded-2xl px-8 ${config.theme.accentClass}`} onClick={submitAnswer}>
-                      Проверить
-                    </Button>
-                  </div>
+    function applyConfigFromJson() {
+      try {
+        const parsed = JSON.parse(el.configInput.value);
+        state.config = {
+          ...structuredClone(DEFAULT_CONFIG),
+          ...parsed,
+          theme: {
+            ...structuredClone(DEFAULT_CONFIG.theme),
+            ...(parsed.theme || {})
+          }
+        };
+        updateStaticUI();
+        restartGame();
+        setTeacherMessage("Конфигурация применена.");
+      } catch (error) {
+        setTeacherMessage("Ошибка JSON. Проверь структуру конфигурации.");
+      }
+    }
 
-                  <AnimatePresence>
-                    {feedback && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0 }}
-                        className={`rounded-2xl p-4 text-center font-medium border ${
-                          feedback.includes("Верно") ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
-                        }`}
-                      >
-                        {feedback}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
+    function applyPreset(name) {
+      const next = {
+        ...state.config,
+        difficulty: name,
+        totalBridgeParts: name === "easy" ? 6 : name === "medium" ? 7 : 8,
+        attemptsPerTask: name === "hard" ? 1 : 2,
+        timeLimitSec: name === "easy" ? 20 : name === "medium" ? 15 : 12
+      };
+      state.config = next;
+      updateStaticUI();
+      restartGame();
+      setTeacherMessage(`Применён пресет: ${name}.`);
+    }
 
-          {screen === "game" && bossUnlocked && (
-            <motion.div key="boss" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <DragonBoss
-                onWin={() => {
-                  playBeep("win");
-                  setScreen("success");
-                }}
-              />
-            </motion.div>
-          )}
+    document.getElementById("teacherToggleBtn").addEventListener("click", () => {
+      el.teacherPanel.classList.toggle("hidden");
+    });
+    document.getElementById("restartBtn").addEventListener("click", restartGame);
+    document.getElementById("startBtn").addEventListener("click", () => {
+      state.tasks = getTasks(state.config);
+      state.currentIndex = 0;
+      state.builtParts = 0;
+      resetRoundState();
+      renderBridge();
+      renderTask();
+      showScreen("game");
+    });
+    document.getElementById("checkBtn").addEventListener("click", submitAnswer);
+    document.getElementById("successRestartBtn").addEventListener("click", restartGame);
+    document.getElementById("failRestartBtn").addEventListener("click", restartGame);
+    document.getElementById("applyConfigBtn").addEventListener("click", applyConfigFromJson);
+    document.getElementById("copyConfigBtn").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(el.configInput.value);
+        setTeacherMessage("JSON скопирован в буфер обмена.");
+      } catch {
+        setTeacherMessage("Не удалось скопировать автоматически. Скопируй JSON вручную.");
+      }
+    });
+    document.querySelectorAll("[data-preset]").forEach(btn => {
+      btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
+    });
+    document.getElementById("attackDragonBtn").addEventListener("click", () => {
+      state.bossHits += 1;
+      el.bossBar.style.width = Math.min(100, (state.bossHits / 3) * 100) + "%";
+      if (state.bossHits >= 3) {
+        showScreen("success");
+      }
+    });
 
-          {screen === "success" && (
-            <motion.div key="success" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}>
-              <Card className="rounded-3xl shadow-xl border-0 bg-white/90 overflow-hidden">
-                <CardContent className="p-8 text-center space-y-5">
-                  <div className="text-[120px]">🦸‍♂️👸</div>
-                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-100 text-emerald-700 font-medium">
-                    <CheckCircle2 className="w-4 h-4" /> Победа
-                  </div>
-                  <h2 className="text-3xl font-black text-slate-800">Поздравляем! Ты спас принцессу!</h2>
-                  <p className="text-slate-600 max-w-2xl mx-auto">
-                    Мост полностью построен, путь открыт, и {config.theme.heroName.toLowerCase()} успешно добрался до башни.
-                  </p>
-                  <div className="flex justify-center">
-                    <Button className={`rounded-2xl px-8 ${config.theme.accentClass}`} onClick={restartGame}>
-                      Играть снова
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
-
-          {screen === "fail" && (
-            <motion.div key="fail" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}>
-              <Card className="rounded-3xl shadow-xl border-0 bg-white/90 overflow-hidden">
-                <CardContent className="p-8 text-center space-y-5">
-                  <div className="text-[120px]">💔👸</div>
-                  <h2 className="text-3xl font-black text-slate-800">
-                    К сожалению, ты не смог построить мост и спасти принцессу.
-                  </h2>
-                  <p className="text-slate-600 max-w-2xl mx-auto">
-                    Но ничего страшного — попробуй ещё раз, выбери другую сложность или измени параметры в будущем редакторе.
-                  </p>
-                  <div className="flex justify-center">
-                    <Button className={`rounded-2xl px-8 ${config.theme.accentClass}`} onClick={restartGame}>
-                      Начать заново
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-}
+    updateStaticUI();
+    restartGame();
+  </script>
+</body>
+</html>
